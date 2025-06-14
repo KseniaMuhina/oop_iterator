@@ -1,39 +1,43 @@
-"""
-Implementation of the Iterator Design Pattern.
-"""
-
 from abc import ABC, abstractmethod
+from collections.abc import Iterable as PyIterable, Iterator as PyIterator
+from typing import Any, List, Optional
 
-# --- Abstract Interfaces ---
 
 class Iterator(ABC):
     """
-    Abstract Iterator interface.
+    Abstract Iterator interface (GoF Style).
     Declares the interface for accessing and traversing elements.
     """
     @abstractmethod
     def has_next(self) -> bool:
-        """Checks if there are more elements."""
+        """Checks if there are more elements (GoF specific)."""
         pass
 
     @abstractmethod
-    def next(self):
-        """Returns the next element in the collection."""
+    def __next__(self) -> Any:
+        """
+        Returns the next element in the sequence.
+        Raises StopIteration when the end of the collection is reached.
+        """
         pass
+
+    # For Pythonic compatibility, __iter__ should return self for an iterator
+    def __iter__(self) -> PyIterator:
+        return self
 
 
 class Iterable(ABC):
     """
-    Abstract Iterable interface.
+    Abstract Iterable interface (GoF Style).
     Declares the interface for creating an Iterator object.
     """
     @abstractmethod
     def create_iterator(self) -> Iterator:
-        """Returns a new iterator for the collection."""
+        """Returns a new concrete GoF Iterator object for the collection."""
         pass
 
 
-# --- Concrete Implementations ---
+# Concrete Implementations
 
 class Book:
     """Represents a simple Book object."""
@@ -49,101 +53,123 @@ class Book:
             return NotImplemented
         return self.title == other.title and self.author == other.author
 
+    def __hash__(self):
+        return hash((self.title, self.author))
 
-class BookCollection(Iterable):
+
+class BookCollection(Iterable, PyIterable):
     """
     Concrete Aggregate that holds a collection of books.
-    Implements the Iterable interface to return a concrete Iterator.
+    Implements the GoF Iterable interface and Python's Iterable protocol.
     """
-    def __init__(self):
-        self._books = []
+    def __init__(self, collection: Optional[List[Book]] = None) -> None:
+        self._books: List[Book] = collection or []
 
-    def add_book(self, book: Book):
+    def add_book(self, book: Book) -> None:
         """Adds a book to the collection."""
         self._books.append(book)
 
-    def get_book(self, index: int) -> Book:
-        """Gets a book by its index (for internal use, not part of iterator public API)."""
+    def __len__(self) -> int:
+        """Returns the number of books in the collection (Pythonic)."""
+        return len(self._books)
+
+    def __getitem__(self, index: int) -> Book:
+        """Allows access to elements by index (Pythonic)."""
         if 0 <= index < len(self._books):
             return self._books[index]
         raise IndexError("Book index out of bounds.")
 
     def count(self) -> int:
-        """Returns the number of books in the collection."""
-        return len(self._books)
+        """GoF-style method to return the number of books."""
+        return self.__len__()
 
     def create_iterator(self) -> Iterator:
         """
-        Creates and returns a concrete iterator for this collection.
+        Creates and returns a concrete GoF-style iterator for this collection
+        (forward traversal by default).
         """
-        return BookIterator(self)
+        return BookIterator(self, reverse=False)
+
+    def get_reverse_iterator(self) -> Iterator:
+        """
+        Creates and returns a concrete GoF-style iterator for this collection
+        (reverse traversal).
+        """
+        return BookIterator(self, reverse=True)
+
+    def __iter__(self) -> PyIterator:
+        """
+        Returns a Pythonic iterator for the collection.
+        This allows the collection to be used directly in a 'for' loop.
+        """
+        return BookIterator(self, reverse=False)
 
 
-class BookIterator(Iterator):
+class BookIterator(Iterator, PyIterator):
     """
     Concrete Iterator that traverses the BookCollection.
     Keeps track of the current position in the traversal.
+    Implements both GoF Iterator interface and Python's Iterator protocol.
     """
-    def __init__(self, collection: BookCollection):
+    def __init__(self,
+                 collection: BookCollection,
+                 reverse: bool = False) -> None:
         self._collection = collection
-        self._position = 0
+        self._reverse = reverse
+        self._position = len(collection) - 1 if reverse else 0
 
     def has_next(self) -> bool:
         """
-        Checks if there are more books to iterate over.
+        Checks if there are more books to iterate over (GoF specific).
         """
-        return self._position < self._collection.count()
+        if self._reverse:
+            return self._position >= 0
+        return self._position < len(self._collection)
 
-    def next(self):
+    def __next__(self) -> Any:
         """
         Returns the next book in the collection and advances the iterator.
         Raises StopIteration if there are no more elements.
         """
         if not self.has_next():
             raise StopIteration("No more elements in the collection.")
-        
-        book = self._collection.get_book(self._position)
-        self._position += 1
+
+        book = self._collection[self._position]
+        self._position += (-1 if self._reverse else 1)
         return book
 
 
-# --- Client Code Example ---
 if __name__ == "__main__":
     collection = BookCollection()
-    collection.add_book(Book("The Hitchhiker's Guide to the Galaxy", "Douglas Adams"))
+    collection.add_book(Book("The Hitchhiker's Guide to the Galaxy",
+                             "Douglas Adams"))
     collection.add_book(Book("1984", "George Orwell"))
     collection.add_book(Book("Brave New World", "Aldous Huxley"))
 
-    print("Iterating through the book collection:")
-    iterator = collection.create_iterator()
-    while iterator.has_next():
-        book = iterator.next()
+    print("--- GoF-style Iteration (Forward) ---")
+    gof_iterator = collection.create_iterator()
+    while gof_iterator.has_next():
+        book = gof_iterator.__next__()  # Using __next__ directly
         print(f"- {book}")
 
-    print("\nAttempting to iterate beyond the end (demonstrates StopIteration):")
+    print("\n--- Pythonic Iteration (Forward via 'for' loop) ---")
+    for book in collection:  # Uses __iter__ and __next__ automatically
+        print(f"- {book}")
+
+    print("\n--- GoF-style Iteration (Reverse) ---")
+    reverse_iterator = collection.get_reverse_iterator()
+    while reverse_iterator.has_next():
+        book = reverse_iterator.__next__()
+        print(f"- {book}")
+
+    print("\nAttempting to iterate beyond the end")
     try:
-        iterator.next()
+        iterator_beyond_end = collection.create_iterator()
+        # Iterate all elements
+        for _ in collection:
+            pass  # Consume all elements
+
+        # Now try to call __next__ explicitly on the exhausted iterator
+        iterator_beyond_end.__next__()
     except StopIteration as e:
         print(f"Caught expected error: {e}")
-
-    # You can also use Python's built-in iterator protocol (__iter__ and __next__)
-    # For a more Pythonic approach, you'd typically implement __iter__ in BookCollection
-    # and yield elements. However, for demonstrating the GoF pattern explicitly,
-    # we're using the separate Iterator class.
-
-    # Example of a Pythonic iterator (if we were to adapt BookCollection):
-    # class PythonicBookCollection:
-    #     def __init__(self):
-    #         self._books = []
-    #     def add_book(self, book: Book):
-    #         self._books.append(book)
-    #     def __iter__(self):
-    #         for book in self._books:
-    #             yield book
-    
-    # print("\nUsing Pythonic iteration:")
-    # pythonic_collection = PythonicBookCollection()
-    # pythonic_collection.add_book(Book("Dune", "Frank Herbert"))
-    # pythonic_collection.add_book(Book("Foundation", "Isaac Asimov"))
-    # for book in pythonic_collection:
-    #     print(f"- {book}")
